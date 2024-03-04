@@ -1,0 +1,6 @@
+langchain==0.0.331rc2
+openai>=1.0.0
+opencv-python
+python-dotenv
+gradio==4.19.1
+opencv-python-headless
