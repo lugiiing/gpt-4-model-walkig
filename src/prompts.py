@@ -41,6 +41,7 @@ Write an full text that synthesizes and summarizes the contents of all the text 
 Each evaluates a specific part, and you should combine them based on what was evaluated in each part.
 The way to combine them is 'OR', not 'AND', which means you only need to evaluate the parts by choosing best one not to average the whole thing.
 Concatenate based on what was evaluated, if anything.
+And for the last, add restructured overall evaluation about the posture, stride, confidnece, and alignment at the end of the evaluation result. 
 
 Example:
 <Video Evaluation>
@@ -59,10 +60,12 @@ REASON: (Explain why did you rated it that way)
 (Explain how that above 'Total score' was calculated)
 
 Output:
+
+----END of the summary----
+
+**table**
+
+[['Posture', 'Stride', 'Confidence', 'Alignment'], [(posture score of the walking), (stride score of the walking), (confidence score of the walking), (alignment score of the walking)]]
+
 """
 
-
-if __name__ == "__main__":
-    print(VISION_SYSTEM_PROMPT)
-    print(USER_PROMPT_TEMPLATE)
-    print(FINAL_EVALUATION_PROMPT)
