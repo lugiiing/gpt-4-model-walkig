@@ -1,21 +1,22 @@
-import time
 import io
 import gradio as gr
 import cv2
 import base64
 import openai
 import os
+import asyncio
+import concurrent.futures
+from openai import AsyncOpenAI
 
 from langchain.prompts import PromptTemplate
 from langchain.chat_models import ChatOpenAI
 from langchain.schema import StrOutputParser
 from PIL import Image
 import ast
-import pandas as pd
 import matplotlib.pyplot as plt
 
 
-from prompts import VISION_SYSTEM_PROMPT, USER_PROMPT_TEMPLATE, FINAL_EVALUATION_PROMPT
+from prompts import VISION_SYSTEM_PROMPT, USER_PROMPT_TEMPLATE, FINAL_EVALUATION_SYSTEM_PROMPT, FINAL_EVALUATION_USER_PROMPT, SUMMARY_AND_TABLE_PROMPT
 from dotenv import load_dotenv
 
 
@@ -23,7 +24,7 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
-
+global global_dict
 global_dict = {}
 
 ######
@@ -148,146 +149,208 @@ def show_batches(video_file):
     return images1
 
 rubrics = ""
-rubrics_keyword = []
+rubrics_keyword = ''
 
 
 # 각 버튼에 대한 액션 함수 정의
-def action_lower_body():
-    rubrics = "1. Step onto your toes with your big toe and knee perpendicular, centered on the front third of the ball of your foot. 2. Walk in a figure of 1 (slightly more like a figure 11 for men) along the line on the floor. 3. Walk with your legs so that your knees are touching. 4. Avoid walking in a stance where the tips of your feet come together and a limp where the tips of your feet spread outward. 5. Keeping your legs together in a straight line shouldn't cause your hips or pelvis to sway violently."
-    rubrics_keyword = []
-    global_dict['rubrics'] = rubrics
+
+def action_weight_shift():
+    rubric_a = "1. Fouse on Lower body-Feet-Weight Shift, Step on your toes, centered on the front third of the ball of your foot and perpendicular to the floor. 2. Focus on Lower body-Feet-Weight Shift, Follow the line on the floor, stepping out in a figure of 1 (closer to a figure of 11 for men). 3. Focus on Lower body-Knee-Weight Shift,Walk so that both knees are touching."
+    rubric_b = "4. Focus on Upper body- Shoulder Weight Shift, Be careful not to let your shoulders slump too far back and shift your center of gravity backwards. 5. Focus on Upper body Weight Shift, Keep your upper body straight and move your legs along vertically without losing balance."
+    rubric_subsets = {'a':rubric_a, 'b':rubric_b}
+    rubrics_keyword = '"Feet Weight Shift", "Feet Walking Line", "Knee Weight Shift", "Shoulder Weight Shift", "Upper Body Weight Shift"'
+    global_dict['rubric_subsets'] = rubric_subsets
     global_dict['rubrics_keyword'] = rubrics_keyword
-    return rubrics
+    return rubric_subsets, rubrics_keyword
 
-def action_hands_arms():
-    rubrics = "1. Stand with your arms lightly resting on the sides of your pelvis/hips, arms extended naturally (not bent), allowing for full arm movement. 2. The rocking angle should be 45 degrees forward and 15 degrees backward, with more forward extension. 3. The left and right sides should be at the same angle and shape so that the movement is side-to-side balanced. 4. Make a moderate fist, bending slightly to feel like you're holding a small ball or egg at your fingertips. 5. Place your palms on your inner thighs, with your thumbs facing forward, and brush your thighs with each step."
-    rubrics_keyword = []
-    global_dict['rubrics'] = rubrics
+def action_balance():
+    rubric_a = "1. Focus on Lower body-Leg Balance, Walk so that your hips or pelvis do not sway violently when you bring your legs together in a straight line. 2. Focus on Upper body-Arm Balance,your left and right arms should have the same angle and shape so that they are balanced."
+    rubric_b = "3. Focus on Upper body- Head Balance, Keep your gaze and face straight ahead at all times, and do not let your head dip or tilt to the side. 4. Focus on Upper body- Shoulder Balance, your shoulders should not be tilted to one side, and your shoulders and ears should be in the following positions. 5. Focus on Upper body-Posture Balance, Your pelvis, back, shoulders, and neck should be symmetrical from side to side."
+    rubric_subsets = {'a':rubric_a, 'b':rubric_b}
+    rubrics_keyword = '"Leg Balance", "Arm Balance", "Gaze", "Shoulder Balance", "Posture Balance"'
+    global_dict['rubric_subsets'] = rubric_subsets
     global_dict['rubrics_keyword'] = rubrics_keyword
-    return rubrics
+    return rubric_subsets, rubrics_keyword
 
-def action_upper_body():
-    rubrics = "1. The chin should not be lifted, but the neck should be stretched and drawn in towards the chest at about 5 degrees. 2. Keep your gaze and face straight ahead at all times and watch out for head tilting or sideways. 3. Don't let your shoulders fall back too far to shift your center of gravity backwards. 4. Open your shoulders and then round them back about 3 degrees. 5. Your shoulders shouldn't be tilted to one side, and your shoulders and ears should be level. 6. Keep your chest open, but when you look to the side, bring your ribs together in the back on both sides. 7. The upper body tilts backwards between three and five degrees. 8. Keep your upper body straight at all times and follow your legs vertically as they move out without losing your balance."
-    rubrics_keyword = []
-    global_dict['rubrics'] = rubrics
+def action_form():
+    rubric_a = "1. Focus on Upper body-Arm Position, Walk with your arms at the side of your pelvis/hips, with a natural extension and not excessive bending. 2. Focus on Upper body-Arm Form, The angle of the bent elbow should be about 45 degrees forward and 15 degrees backward, with the arms extending more forward. "
+    rubric_b = "3. Focus on Upper body-Hand Form,Your hands should be slightly bent and made into a fist, as if you're holding a small ball or egg at your fingertips. 4. Focus on Upper body-Hand Form and Hand Position, Make a fist with your thumbs facing forward and move your arms across your thighs."
+    rubric_c = "5. Focus on Upper body-Head form, Your chin should be drawn in towards your chest about 5 degrees with your neck stretched out, not overly lifted. 6. Focus on Upper body- Shoulder Form,Open your shoulders and lower back straight and without tension and then round them back about 3 degrees. "
+    rubric_d = "7. Focus on Upper body- Chest Form, Keep your chest open, bring your ribs together in the back on both sides. 8. Focus on Lower body-Feet Form, Don't walk with your toes together or in a limp position where your toes point outward. "
+    rubric_subsets = {'a':rubric_a, 'b':rubric_b, 'c':rubric_c, 'd':rubric_d}
+    rubrics_keyword = '"Arm Position", "Arm Angle", "Hand Form", "Hand Position", "Chin", "Shoulder Angle", "Chest", "Leg Form"'
+    global_dict['rubric_subsets'] = rubric_subsets
     global_dict['rubrics_keyword'] = rubrics_keyword
-    return rubrics
+    return rubric_subsets, rubrics_keyword
 
-def action_ect():
-    rubrics = "1. Stand in a vertical upright position, keeping your shoulders and lower back straight and without tension. 2. Your pelvis, back, shoulders, and neck should be symmetrical from side to side. 3. Wear black shoes that are 7 to 9 centimeters high. 4. Wear clothing that shows as much of your body as possible so you can easily see your movements. (Black sleeveless dress, short pants, miniskirts)"
-    rubrics_keyword = []
-    global_dict['rubrics'] = rubrics
+def action_all():
+    rubric_a = "1. Fouse on Lower body-Feet-Weight Shift, Step on your toes, centered on the front third of the ball of your foot and perpendicular to the floor. 2. Focus on Lower body-Feet-Weight Shift, Follow the line on the floor, stepping out in a figure of 1 (closer to a figure of 11 for men). 3. Focus on Lower body-Knee-Weight Shift,Walk so that both knees are touching. 4. Focus on Upper body- Shoulder Weight Shift, Be careful not to let your shoulders slump too far back and shift your center of gravity backwards. 5. Focus on Upper body Weight Shift, Keep your upper body straight and move your legs along vertically without losing balance."
+    rubric_b = "6. Focus on Lower body-Leg Balance, Walk so that your hips or pelvis do not sway violently when you bring your legs together in a straight line. 7. Focus on Upper body-Arm Balance,Your left and right arms should have the same angle and shape so that they are balanced. 8. Focus on Upper body- Head Balance, Keep your gaze and face straight ahead at all times, and don't let your head dip or tilt to the side. 9. Focus on Upper body- Shoulder Balance,Your shoulders should not be tilted to one side, and your shoulders and ears should be in the following positions. 10. Focus on Upper body-Posture Balance, Your pelvis, back, shoulders, and neck should be symmetrical from side to side."
+    rubric_c = "11. Focus on Upper body-Arm Position, Walk with your arms at the side of your pelvis/hips, with a natural extension and not excessive bending. 12. Focus on Upper body-Arm Form, The angle of the bent elbow should be about 45 degrees forward and 15 degrees backward, with the arms extending more forward. 13. Focus on Upper body-Hand Form,Your hands should be slightly bent and made into a fist, as if you're holding a small ball or egg at your fingertips. 14. Focus on Upper body-Hand Form and Hand Position, Make a fist with your thumbs facing forward and move your arms across your thighs."
+    rubric_d = "15. Focus on Upper body-Head form, Your chin should be drawn in towards your chest about 5 degrees with your neck stretched out, not overly lifted. 16. Focus on Upper body- Shoulder Form,Open your shoulders and lower back straight and without tension and then round them back about 3 degrees. 17. Focus on Upper body- Chest Form, Keep your chest open, bring your ribs together in the back on both sides. 18. Focus on Lower body-Feet Form, Do not walk with your toes together or in a limp position where your toes point outward. "
+    rubric_subsets = {'a':rubric_a, 'b':rubric_b, 'c':rubric_c, 'd':rubric_d}
+    rubrics_keyword = '"Feet Weight Shift", "Feet Walking Line", "Knee Weight Shift", "Shoulder Weight Shift", "Upper Body Weight Shift", "Leg Balance", "Arm Balance", "Gaze", "Shoulder Balance", "Posture Balance", "Arm Position", "Arm Angle", "Hand Form", "Hand Position", "Chin", "Shoulder Angle", "Chest", "Leg Form"'
+    global_dict['rubric_subsets'] = rubric_subsets
     global_dict['rubrics_keyword'] = rubrics_keyword
-    return rubrics
+    return rubric_subsets, rubrics_keyword
 
 
-
-#def call_gpt_vision(rubrics, progress=gr.Progress()) -> list:
-
-def call_gpt_vision(progress=gr.Progress()) -> list:
-    frames = global_dict.get('batched_frames')
-    rubrics = global_dict.get('rubrics')
-
-    openai.api_key = OPENAI_API_KEY
-
-    full_result_vision = []
-    full_text_vision = ""
-    idx = 0
-
-    for batch in progress.tqdm(frames):
-        VISION_PROMPT_MESSAGES = [
-            {
-                "role": "system",
-                "content": VISION_SYSTEM_PROMPT,
-            },
-            {
-                "role": "user",
-                "content": [
-                    PromptTemplate.from_template(USER_PROMPT_TEMPLATE).format(rubrics=rubrics),
-                    *map(lambda x: {"image": x, "resize": 300}, batch),
-                ],
-            },
-        ]
-        
-        params = {
+async def async_call_gpt_vision(client, batch, rubric_subset):
+    # Format the messages for the vision prompt, including the rubric subset and images in the batch
+    vision_prompt_messages = [
+        {"role": "system", "content": VISION_SYSTEM_PROMPT},  # Ensure VISION_SYSTEM_PROMPT is defined
+        {
+            "role": "user",
+            "content": [
+                PromptTemplate.from_template(USER_PROMPT_TEMPLATE).format(rubrics=rubric_subset),  # Ensure USER_PROMPT_TEMPLATE is defined
+                *map(lambda x: {"image": x, "resize": 300}, batch),
+            ],
+        },
+    ]
+    
+    # Parameters for the API call
+    params = {
         "model": "gpt-4-vision-preview",
-        "messages": VISION_PROMPT_MESSAGES,
+        "messages": vision_prompt_messages,
         "max_tokens": 1024,
-        }
+    }
 
-        try:
-            result = openai.chat.completions.create(**params)
-            print(result.choices[0].message.content)
-            full_result_vision.append(result)
-        except Exception as e:
-            print(f"Error: {e}")
-            full_text_vision += f'### BATCH_{idx+1}\n' + "-"*50 + "\n" + f"Error: {e}" +  "\n" + "-"*50 + "\n"
-            idx += 1
-            pass
-        
+    # Asynchronous API call
+    try:
+        result_raw = await client.chat.completions.create(**params)
+        result = result_raw.choices[0].message.content
+        print(result)
+        return result
+    except Exception as e:
+        print(f"Error processing batch with rubric subset {rubric_subset}: {e}")
+        return None
+    
+
+async def process_rubrics_in_batches(client, frames, rubric_subsets):
+    
+    results = {}
+    for key, rubric_subset in rubric_subsets.items():
+        # Process each image batch with the current rubric subset
+        tasks = [async_call_gpt_vision(client, batch, rubric_subset) for batch in frames]
+        subset_results = await asyncio.gather(*tasks)
+        results[key] = [result for result in subset_results if result is not None]
+
+    # Filter out None results in case of errors
+    return results
+
+def wrapper_call_gpt_vision():
+    client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    frames = global_dict.get('batched_frames')
+    rubric_subsets = global_dict.get('rubric_subsets')
+
+    async def call_gpt_vision():
+        async_full_result_vision = await process_rubrics_in_batches(client, frames, rubric_subsets)
         if 'full_result_vision' not in global_dict:
-            global_dict.setdefault('full_result_vision', full_result_vision)
+            global_dict.setdefault('full_result_vision', async_full_result_vision)
         else:
-            global_dict['full_result_vision'] = full_result_vision
-        
-    return full_text_vision
+            global_dict['full_result_vision'] = async_full_result_vision
+        return async_full_result_vision
+    
+    # 새 이벤트 루프 생성 및 설정
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(call_gpt_vision())
 
 
+async def async_get_evaluation_text(client, result_subset):
+    
+    result_subset_text = ' \n'.join(result_subset)
+    evaluation_text = PromptTemplate.from_template(FINAL_EVALUATION_USER_PROMPT).format(evals = result_subset_text)
 
-def get_full_result():
+    evaluation_text_message = [
+        {"role": "system", "content": FINAL_EVALUATION_SYSTEM_PROMPT},  # Ensure VISION_SYSTEM_PROMPT is defined
+        {
+            "role": "user",
+            "content": evaluation_text,
+        },
+    ]
+    params = {
+        "model": "gpt-4-vision-preview",
+        "messages": evaluation_text_message,
+        "max_tokens": 1024,
+    }
+
+    # Asynchronous API call
+    try:
+        result_raw_2 = await client.chat.completions.create(**params)
+        result_2 = result_raw_2.choices[0].message.content
+        return result_2
+    except Exception as e:
+        print(f"Error getting evaluation text {result_subset}: {e}")
+        return None
+
+#    return evaluation_text
+
+async def async_get_full_result(client, full_result_vision):
+    
+    #tasks = []
+    results_2 = {}
+    # Create a task for each entry in full_result_vision and add to tasks list
+    for key, result_subset in full_result_vision.items():
+        tasks_2 = [async_get_evaluation_text(client, result_subset)]
+        text_results = await asyncio.gather(*tasks_2)
+        results_2[key] = [result_2 for result_2 in text_results if result_2 is not None]
+    
+
+    results_2_val_list = list(results_2.values())
+    results_2_val = ""
+    for i in range(len(results_2_val_list)):
+        results_2_val += results_2_val_list[i][0]
+        results_2_val += "\n"
+
+    return results_2_val
+    # Combine all results into a single string
+
+
+def wrapper_get_full_result():
+    client = AsyncOpenAI(api_key=OPENAI_API_KEY)
     full_result_vision = global_dict.get('full_result_vision')
-    full_result_audio = global_dict.get('full_text_audio')
-    
-    result_text_video = ""
-    result_text_audio = ""
 
+    #{key: choice.choices[0].message.content for key, choice in full_result_vision.items()}
 
-    for idx, res in enumerate(full_result_vision):
-        result_text_video += f'<Video Evaluation_{idx+1}>\n'
-        result_text_video += res.choices[0].message.content
-        result_text_video += "\n"
-        result_text_video += "-"*5
-        result_text_video += "\n"
-    result_text_video += "*"*5 + "END of Video" + "*"*5 
+    async def get_full_result():
+        full_text = await async_get_full_result(client,full_result_vision)        
+        # global_dict에 결과를 올바르게 저장
+        if 'full_text' not in global_dict:
+            global_dict.setdefault('full_text', full_text)
+        else:
+            global_dict['full_text'] = full_text  # 새 값으로 초기화
+        print("full_text: ")
+        print(full_text)
 
-    if full_result_audio:
-        result_text_audio += '<Audio Evaluation>\n'
-        result_text_audio += full_result_audio
-        result_text_audio += "\n"
-        result_text_audio += "-"*5
-        result_text_audio += "\n"
-        result_text_audio += "*"*5 + "END of Audio" + "*"*5 
-
-        result_text = result_text_video + "\n\n" + result_text_audio
-    else:
-        result_text = result_text_video
-    
-    if 'result_text' not in global_dict:
-            global_dict.setdefault('result_text', result_text)
-    else:
-        global_dict['result_text'] = result_text
-        
-
-    return result_text
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(get_full_result())
 
 
 def get_final_anser():
+    rubrics_keyword = global_dict.get('rubrics_keyword')
+    full_text = global_dict.get('full_text')
+
+
     chain = ChatOpenAI(
         api_key=OPENAI_API_KEY,
         model="gpt-4",
         max_tokens=1024,
         temperature=0,
     )
-    prompt = PromptTemplate.from_template(FINAL_EVALUATION_PROMPT)
+    prompt = PromptTemplate.from_template(SUMMARY_AND_TABLE_PROMPT)
+    
     runnable = prompt | chain | StrOutputParser()
-    result_text = global_dict.get('result_text')
+    final_eval = runnable.invoke({"full_text": full_text, "rubrics_keyword":rubrics_keyword})
 
-    final_eval = runnable.invoke({"evals": result_text})
-
+    print(final_eval)
+    
     if 'final_eval' not in global_dict:
         global_dict.setdefault('final_eval', final_eval)
     else:
         global_dict['final_eval'] = final_eval
+    
     return final_eval
 
 
@@ -295,7 +358,8 @@ def tablize_final_anser():
 
     final_eval = global_dict.get('final_eval')
     pos3 = int(final_eval.find("**table**"))
-    tablize_final_eval = ast.literal_eval(final_eval[(pos3+10):])
+    pos4 = int(final_eval.find("]]"))
+    tablize_final_eval = ast.literal_eval(final_eval[(pos3+10):(pos4+2)])
 
 
     cat_final_eval, val_final_eval = tablize_final_eval[0], tablize_final_eval[1]
@@ -306,6 +370,8 @@ def tablize_final_anser():
     ax.bar(cat_final_eval, val_final_eval)
     ax.set_ylabel('Scores')
     ax.set_title('Scores by category')
+    #plt.xticks(rotation=30)
+    plt.rc('xtick', labelsize=3)
     ax.set_xticks(range(len(cat_final_eval)))
     ax.set_yticks([0,2,4,6,8,10])
 
@@ -322,27 +388,22 @@ def tablize_final_anser():
     return image
 
 
-#    df_final_eval = pd.DataFrame(tablize_final_eval)
-#    return tablize_final_eval
-
-
 def breif_final_anser():
     final_eval = global_dict.get('final_eval')
-    pos1 = int(final_eval.find("**Overall opinion**"))
+    pos1 = int(final_eval.find("**Total score**"))
     pos2 = int(final_eval.find("----END of the summary----"))
     breif_final_eval = final_eval[pos1:pos2]
     return breif_final_eval
 
 def fin_final_anser():
-    final_eval = global_dict.get('final_eval')
-    pos1 = int(final_eval.find("**Overall opinion**"))
-    fin_final_eval = final_eval[:pos1]
+    full_text = global_dict.get('full_text')
+    fin_final_eval = full_text
     return fin_final_eval
 
 
 def mainpage():
     with gr.Blocks() as start_page:
-        gr.Markdown("M-WAVE: Model Walk Analysis and Virtual Evaluation")
+        gr.Markdown("Title")
         with gr.Row():
             with gr.Column(scale=1):
                 start_button = gr.Button("start")
@@ -356,10 +417,10 @@ def mainpage():
                 )
 
             with gr.Column(scale=1):
-                lower_body_button = gr.Button("Lower Body")
-                hands_arms_button = gr.Button("Hands Arms")
-                upper_body_button = gr.Button("Upper Body")
-                ect_button = gr.Button("ECT")
+                weight_shift_button = gr.Button("Weight Shift")
+                balance_button = gr.Button("Balance")
+                form_button = gr.Button("Form")
+                overall_button = gr.Button("Overall")
 
         with gr.Row():
             with gr.Column(scale=1):
@@ -399,11 +460,17 @@ def mainpage():
 
 
         #start_button.click(fn = video_rubric, inputs=[], outputs= [])
-        lower_body_button.click(fn = action_lower_body, inputs=[], outputs=[])
-        hands_arms_button.click(fn = action_hands_arms, inputs=[], outputs=[])
-        upper_body_button.click(fn = action_upper_body, inputs=[], outputs=[])
-        ect_button.click(fn = action_ect, inputs=[], outputs=[])
-        process_button.click(fn=show_batches, inputs=[video_upload], outputs=[gallery]).success(fn=call_gpt_vision, inputs=[], outputs=[]).success(fn=get_full_result, inputs=[], outputs=[]).success(fn=get_final_anser, inputs=[], outputs=[]).success(fn=tablize_final_anser, inputs=[], outputs=[output_box_fin_table]).success(fn=breif_final_anser, inputs=[], outputs=[output_box_fin_brief]). success(fn=fin_final_anser, inputs=[], outputs=[output_box_fin_fin])  #output=None? []?
+        weight_shift_button.click(fn = action_weight_shift, inputs=[], outputs=[])
+        balance_button.click(fn = action_balance, inputs=[], outputs=[])
+        form_button.click(fn = action_form, inputs=[], outputs=[])
+        overall_button.click(fn = action_all, inputs=[], outputs=[])
+        process_button.click(fn=show_batches, inputs=[video_upload], outputs=[gallery])\
+            .success(fn=lambda: wrapper_call_gpt_vision(), inputs=[], outputs=[]) \
+            .success(fn=lambda: wrapper_get_full_result(), inputs=[], outputs=[])\
+            .success(fn=get_final_anser, inputs=[], outputs=[])\
+            .success(fn=tablize_final_anser, inputs=[], outputs=[output_box_fin_table])\
+            .success(fn=breif_final_anser, inputs=[], outputs=[output_box_fin_brief])\
+            .success(fn=fin_final_anser, inputs=[], outputs=[output_box_fin_fin])  #output=None? []?
 
     start_page.launch()
 
@@ -411,81 +478,3 @@ def mainpage():
 
 if __name__ == "__main__":
     mainpage()
-
-
-
-"""
-# Define the Gradio app
-def main():
-    with gr.Blocks() as demo:
-        gr.Markdown("# GPT-4 Vision for Evaluation")
-        gr.Markdown("## Make Batched Snapshots")
-        with gr.Row():
-            with gr.Column(scale=1):
-                video_upload = gr.File(
-                    label="Upload your video (video under 1 minute is the best..!)",
-                    file_types=["video"],
-                )
-                
-                # case1 - 영상의 길이를 지정해주기 (15초, 30초 내외... - 너무 짧은 영상을 넣으면, 이 값을 고정했을 때 스냅샷이 잘 안 뽑힐 수 있음)
-                # case2 - 영상의 길이를 지정하지 않기 (어차피 1분 이내밖에 안됨)
-                total_batch_percent = gr.Slider(
-                    label="How many snapshots do you wnat to take for the evaluation? Shorter videos need more snapshots.",
-                    info="Choose between 1(less) and 100(more)",
-                    value=3,
-                    minimum=1,
-                    maximum=100,
-                    step=1
-                )
-                process_button = gr.Button("Process")         
-                gallery1 = gr.Gallery(
-                    label="Batched Snapshots of Video",
-                    columns=[3],
-                    rows=[10],
-                    object_fit="contain",
-                    height="auto",
-                )
-            
-        gr.Markdown("## Set Evaluation Rubric")
-        with gr.Row():
-            with gr.Column(scale=1):
-                rubric_video_input = gr.Textbox(
-                    label="2. Video Evaluation Rubric",
-                    info="Enter your evaluation rubric here...",
-                    placeholder="Here's what the performer should *SHOW* as follows:\n1. From standing, bend your knees and straighten your arms in front of you.\n2. Place your hands on the floor, shoulder width apart with fingers pointing forward and your chin on your chest.\n3. Rock forward, straighten legs and transfer body weight onto shoulders.\n4. Rock forward on a rounded back placing both feet on the floor.\n5. Stand using arms for balance, without hands touching the floor.",
-                    lines=7
-                )
-                evaluate_button = gr.Button("Evaluate")
-        with gr.Row():
-            with gr.Column(scale=1):
-                gallery2 = gr.Gallery(
-                    label="Batched Snapshots of Video",
-                    columns=[3],
-                    rows=[10],
-                    object_fit="contain",
-                    height="auto",
-                )
-            with gr.Column(scale=1):
-                video_output_box = gr.Textbox(
-                    label="Video Batched Snapshots Eval...",
-                    lines=8,
-                    interactive=False
-                )
-
-        gr.Markdown("## Get Summarized Result")
-        with gr.Row():
-             with gr.Column(scale=1):
-                output_box_fin_fin = gr.Textbox(
-                    label="Final Evaluation",
-                    lines=10,
-                    interactive=True,
-                    show_copy_button=True,
-                )
-
-       
-        process_button.click(fn=show_batches, inputs=[video_upload], outputs=[gallery1, gallery2])
-        evaluate_button.click(fn=call_gpt_vision, inputs=[rubric_video_input], outputs=video_output_box).success(fn=get_full_result, inputs=[], outputs=[]).success(fn=get_final_anser, inputs=[video_output_box], outputs=output_box_fin_fin)
-        ### then -> success
-
-    demo.launch()"""
-
