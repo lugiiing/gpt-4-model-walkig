@@ -148,11 +148,13 @@ def show_batches(video_file):
     
     return images1
 
-rubrics = ""
-rubrics_keyword = ''
 
 
 # 각 버튼에 대한 액션 함수 정의
+
+rubrics = ""
+rubrics_keyword = ''
+
 
 def action_weight_shift():
     rubric_a = "1. Fouse on Lower body-Feet-Weight Shift, Step on your toes, centered on the front third of the ball of your foot and perpendicular to the floor. 2. Focus on Lower body-Feet-Weight Shift, Follow the line on the floor, stepping out in a figure of 1 (closer to a figure of 11 for men). 3. Focus on Lower body-Knee-Weight Shift,Walk so that both knees are touching."
